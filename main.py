@@ -2,9 +2,11 @@ import csv
 import requests
 import json
 import os
+import re
 from random import uniform, choice
 
-BASE_URL = "https://api.hubapi.com"
+HUBAPI_URL = "https://api.hubapi.com"
+SOC_URL = "https://ws1.soc.com.br/WebSoc"
 HEARDERS = {
     "Authorization": f"Bearer {os.environ['TOKEN']}",
     "Content-Type": "application/json",
@@ -12,7 +14,7 @@ HEARDERS = {
 
 
 def create_company(client):
-    endpoint = f"{BASE_URL}/companies/v2/companies/"
+    endpoint = f"{HUBAPI_URL}/companies/v2/companies/"
     data = json.dumps(
         {
             "properties": [
@@ -38,50 +40,66 @@ def create_company(client):
 
 
 def create_deal(client, company, contact):
-    endpoint = f"{BASE_URL}/deals/v1/deal/"
-    data = json.dumps(
-        {
-            "associations": {
-                "associatedCompanyIds": [company["companyId"]],
-                "associatedVids": [contact["vid"]],
+    endpoint = f"{HUBAPI_URL}/deals/v1/deal/"
+    data = {
+        "associations": {
+            "associatedCompanyIds": [company["companyId"]],
+            "associatedVids": [contact["vid"]],
+        },
+        "properties": [
+            {"value": client["NOME"], "name": "dealname"},
+            {
+                "value": choice(
+                    [
+                        "1089243",
+                        "appointmentscheduled",
+                        "presentationscheduled",
+                        "qualifiedtobuy",
+                        "decisionmakerboughtin",
+                    ]
+                ),
+                "name": "dealstage",
             },
-            "properties": [
-                {"value": client["NOME"], "name": "dealname"},
-                {
-                    "value": choice(
-                        [
-                            "1089243",
-                            "appointmentscheduled",
-                            "presentationscheduled",
-                            "qualifiedtobuy",
-                            "decisionmakerboughtin",
-                        ]
-                    ),
-                    "name": "dealstage",
-                },
-                {"value": "default", "name": "pipeline"},
-                {"value": 1409443200000, "name": "closedate"},
-                {"value": uniform(5000.0, 100000.0), "name": "amount"},
-                {"value": "newbusiness", "name": "dealtype"},
-            ],
-        }
-    )
+            {"value": "default", "name": "pipeline"},
+            {"value": 1409443200000, "name": "closedate"},
+            {"value": uniform(5000.0, 100000.0), "name": "amount"},
+            {"value": "newbusiness", "name": "dealtype"},
+        ],
+    }
 
-    r = requests.post(url=endpoint, data=data, headers=HEARDERS)
+    if "companyId" in company:
+        data["associations"]["associatedCompanyIds"] = company["companyId"]
+    if "vid" in contact:
+        data["associations"]["associatedVids"] = contact["vid"]
+
+    r = requests.post(url=endpoint, data=json.dumps(data), headers=HEARDERS)
 
     print(r.text)
     return json.loads(r.text)
 
 
+def create_email(client):
+    domains = [
+        "hotmail.com",
+        "gmail.com",
+        "aol.com",
+        "mail.com",
+        "mail.kz",
+        "yahoo.com",
+    ]
+
+    cleared = re.sub(r"[^a-zA-Z0-9]+", "", client["RAZAOSOCIAL"])
+    first = cleared[:10].lower().replace(" ", "_")
+
+    return f"{first}.{client['CODIGO']}@{choice(domains)}"
+
+
 def create_contact(client):
-    endpoint = f"{BASE_URL}/contacts/v1/contact/"
+    endpoint = f"{HUBAPI_URL}/contacts/v1/contact/"
     data = json.dumps(
         {
             "properties": [
-                {
-                    "property": "email",
-                    "value": f"{client['CODIGO']}{client['email']}",
-                },
+                {"property": "email", "value": f"{create_email(client)}"},
                 {"property": "firstname", "value": client["NOME"]},
                 {"property": "lastname", "value": client["RAZAOSOCIAL"]},
                 {
@@ -101,23 +119,30 @@ def create_contact(client):
     return json.loads(r.text)
 
 
-# def associate_contact_company(contact, company):
-#     print("Success")
-#
-#
-# def associate_company_deal(company, deal):
-#     print("Success")
+def get_clients():
+    parametro = {
+        "empresa": "38380",
+        "codigo": "703",
+        "chave": os.environ["KEY"],
+        "tipoSaida": "csv",
+    }
+
+    params = {"parametro": json.dumps(parametro)}
+    endpoint = f"{SOC_URL}/exportadados"
+    r = requests.get(url=endpoint, params=params)
+    print(r.text)
+    with open("clientes.csv", "w") as text_file:
+        text_file.write(r.text)
 
 
 def main():
+    get_clients()
     with open("clientes.csv", encoding="latin-1") as csvfile:
         clients = csv.DictReader(csvfile, delimiter=";")
         for client in clients:
             contact = create_contact(client)
             company = create_company(client)
-            deal = create_deal(client, company, contact)
-            # associate_contact_company(contact, company)
-            # associate_company_deal(company, deal)
+            create_deal(client, company, contact)
 
 
 if __name__ == "__main__":
